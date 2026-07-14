@@ -1,38 +1,42 @@
 import os
-from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
+from dotenv import load_dotenv
 
-# 1.  Database 
-load_dotenv()
+# 1. เทคนิคหา Path โปรเจกต์หลักอัตโนมัติ (ป้องกันปัญหาหาไฟล์ CSV ไม่เจอ)
+# ดึง Path ของไฟล์ปัจจุบัน แล้วถอยกลับไป 2 ชั้นเพื่อไปที่ Root Folder
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 2. โหลดไฟล์ .env ที่อยู่หน้า Root 
+env_path = os.path.join(BASE_DIR, '.env')
+load_dotenv(env_path)
+
 db_url = os.getenv('DATABASE_URL')
+if not db_url:
+    raise ValueError("❌ หา DATABASE_URL ไม่เจอ! ตรวจสอบไฟล์ .env อีกครั้ง")
+
 engine = create_engine(db_url)
 
 def run_pipeline(csv_file_path):
     print(f"🚀 เริ่มต้นการ Ingest ข้อมูลจาก: {csv_file_path}")
     
-    # 2. Extract: อ่านไฟล์ CSV
-    # ใช้ usecols เพื่อดึงมาเฉพาะคอลัมน์ที่ใช้จริง ลดการใช้ Memory
+    
     columns_to_keep = [
         ' Destination Port', ' Flow Duration', ' Total Fwd Packets', 
         ' Total Backward Packets', 'Total Length of Fwd Packets', 
         ' Total Length of Bwd Packets', 'Flow Bytes/s', ' Flow Packets/s', ' Label'
     ]
+    
+    # 3. Extract: อ่านไฟล์ CSV (ใช้ตัวแปรที่ประกาศด้านบน)
     df = pd.read_csv(csv_file_path, usecols=columns_to_keep)
     
-    # 3. Transform: ทำ Data Cleaning
+    # 4. Transform: ทำ Data Cleaning
     print("🧹 กำลังทำความสะอาดข้อมูล (Cleaning)...")
-    
-    # 3.1 ลบช่องว่าง (Space) หน้าชื่อคอลัมน์ที่เป็นปัญหาสุดคลาสสิกของ Dataset นี้
     df.columns = df.columns.str.strip()
-    
-    # 3.2 จัดการ Dirty Data (Infinity และ NaN)
-    # ชุดข้อมูลนี้เวลามีการหารด้วย 0 มักจะหลุดค่า Infinity มา
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df.dropna(inplace=True) # ลบแถวที่มีค่า NaN ทิ้ง
+    df.dropna(inplace=True)
     
-    # 3.3 เปลี่ยนชื่อคอลัมน์ให้ตรงกับ Database Schema
     df.rename(columns={
         'Destination Port': 'destination_port',
         'Flow Duration': 'flow_duration',
@@ -45,13 +49,18 @@ def run_pipeline(csv_file_path):
         'Label': 'label'
     }, inplace=True)
 
-    # 4. Load: นำข้อมูลเข้า PostgreSQL
-    print("💾 กำลังโหลดข้อมูลเข้าฐานข้อมูล (PostgreSQL)...")
-    # chunksize คือการแบ่งส่งข้อมูลทีละ 10,000 แถว ป้องกัน RAM เต็ม
+    # 5. Load: นำข้อมูลเข้า PostgreSQL
+    print("💾 กำลังโหลดข้อมูลเข้าฐานข้อมูล...")
     df.to_sql('network_traffic', engine, if_exists='append', index=False, chunksize=10000)
     
     print("✅ โหลดข้อมูลสำเร็จ!")
 
-# สั่งรัน Pipeline (เปลี่ยนชื่อไฟล์ตามที่คุณโหลดมา)
 if __name__ == "__main__":
-    run_pipeline('Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv')
+  
+    target_csv = os.path.join(BASE_DIR, 'data', 'raw', 'Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv')
+    
+   
+    if os.path.exists(target_csv):
+        run_pipeline(target_csv)
+    else:
+        print(f"❌ หาไฟล์ CSV ไม่เจอที่ตำแหน่ง: {target_csv}")

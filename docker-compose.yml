@@ -1,0 +1,91 @@
+services:
+  # 1. ฐานข้อมูล PostgreSQL (ระบบเดิม)
+  postgres:
+    image: postgres:14
+    container_name: network_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # 2. แผงควบคุม Grafana (ระบบเดิม)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: network_dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - postgres
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+  # --- เพิ่มระบบ Airflow ---
+
+  # 3. ตัวตั้งค่า Airflow ครั้งแรก (รันครั้งเดียวแล้วจบ)
+  airflow-init:
+    image: apache/airflow:2.9.1
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+    command: >
+      bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com"
+
+  # 4. หน้าเว็บ Airflow UI
+  airflow-webserver:
+    image: apache/airflow:2.9.1
+    container_name: airflow_webserver
+    depends_on:
+      - postgres
+      - airflow-init
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      # บังคับให้ Airflow ลง Library ที่ต้องใช้รันโค้ดของเรา
+      - _PIP_ADDITIONAL_REQUIREMENTS=pandas numpy sqlalchemy psycopg2-binary python-dotenv
+      - AIRFLOW__WEBSERVER__SECRET_KEY=my_super_secret_key_12345
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./.env:/opt/airflow/.env
+      - ./logs:/opt/airflow/logs
+    command: webserver
+    restart: unless-stopped
+
+  # 5. ตัวสั่งการ Airflow (Scheduler)
+  airflow-scheduler:
+    image: apache/airflow:2.9.1
+    container_name: airflow_scheduler
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - _PIP_ADDITIONAL_REQUIREMENTS=pandas numpy sqlalchemy psycopg2-binary python-dotenv
+      - AIRFLOW__WEBSERVER__SECRET_KEY=my_super_secret_key_12345
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./data:/opt/airflow/data
+      - ./.env:/opt/airflow/.env
+    command: scheduler
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  grafana_data:
