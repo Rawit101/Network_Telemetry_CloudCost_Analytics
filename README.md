@@ -149,6 +149,4 @@ Add PostgreSQL as a data source (`postgres:5432`, database `postgres`) and impor
 - [ ] Automated tests in `tests/`
 - [ ] CI pipeline for linting/testing the DAG and ETL script
 
-## 📄 License
 
-Not yet specified.
